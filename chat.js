@@ -843,8 +843,17 @@
 
             // Prevent duplicate calls
             if (isCallActive || isIncomingCall) {
+                const callModalVisible = document.getElementById('callModal')?.classList?.contains('show');
+                const incomingVisible = document.getElementById('incomingCallModal')?.classList?.contains('show');
+                const hasActiveObjects = !!(currentCall || pendingCall);
+
+                if (!callModalVisible && !incomingVisible && !hasActiveObjects) {
+                    isCallActive = false;
+                    isIncomingCall = false;
+                } else {
                 showNotification('Already in a call', 'warning');
                 return;
+                }
             }
 
             try {
@@ -1009,6 +1018,11 @@
                 currentCall = null;
             }
 
+            if (pendingCall) {
+                try { pendingCall.close(); } catch (e) {}
+                pendingCall = null;
+            }
+
             // Hide modals and reset styles
             const callModal = document.getElementById('callModal');
             callModal.classList.remove('show');
@@ -1038,8 +1052,16 @@
             stopVoiceActivityDetection();
 
             // Reset UI
-            document.getElementById('localVideo').style.display = 'none';
-            document.getElementById('remoteVideo').style.display = 'none';
+            const localVideo = document.getElementById('localVideo');
+            const remoteVideo = document.getElementById('remoteVideo');
+            if (localVideo) {
+                localVideo.style.display = 'none';
+                localVideo.srcObject = null;
+            }
+            if (remoteVideo) {
+                remoteVideo.style.display = 'none';
+                remoteVideo.srcObject = null;
+            }
             document.getElementById('callTimer').textContent = '';
             
             // Reset status and mute button
@@ -1577,6 +1599,16 @@
                 
                 // Handle remote stream
                 call.on('stream', (remoteStream) => {
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    if (remoteVideo) {
+                        remoteVideo.srcObject = remoteStream;
+                        remoteVideo.muted = false;
+                        remoteVideo.style.display = isVideo ? 'block' : 'none';
+                        const playPromise = remoteVideo.play?.();
+                        if (playPromise && typeof playPromise.catch === 'function') {
+                            playPromise.catch(() => {});
+                        }
+                    }
                     document.getElementById('callProfileStatus').textContent = 'On call';
                     startCallTimer();
                     // Start voice activity detection for wave animation
@@ -1779,6 +1811,15 @@
             div.textContent = text;
             return div.innerHTML;
         }
+
+        function updateAppHeight() {
+            const h = window.innerHeight;
+            document.documentElement.style.setProperty('--app-height', `${h}px`);
+        }
+
+        window.addEventListener('resize', updateAppHeight);
+        window.addEventListener('orientationchange', updateAppHeight);
+        updateAppHeight();
 
         // Toggle chat sounds mute
         function toggleMuteSounds() {
