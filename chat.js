@@ -895,7 +895,19 @@
                 currentCall.on('stream', (remoteStream) => {
                     const remoteVideo = document.getElementById('remoteVideo');
                     remoteVideo.srcObject = remoteStream;
-                    remoteVideo.style.display = isVideo ? 'block' : 'none';
+                    remoteVideo.muted = false;
+                    remoteVideo.style.display = 'block';
+                    if (!isVideo) {
+                        remoteVideo.style.position = 'absolute';
+                        remoteVideo.style.width = '1px';
+                        remoteVideo.style.height = '1px';
+                        remoteVideo.style.opacity = '0';
+                        remoteVideo.style.pointerEvents = 'none';
+                    }
+                    const playPromise = remoteVideo.play?.();
+                    if (playPromise && typeof playPromise.catch === 'function') {
+                        playPromise.catch(() => {});
+                    }
                     document.getElementById('callProfileStatus').textContent = 'On call';
                     startCallTimer();
                     // Start voice activity detection for wave animation
@@ -1813,12 +1825,17 @@
         }
 
         function updateAppHeight() {
-            const h = window.innerHeight;
+            const vv = window.visualViewport;
+            const h = vv?.height || window.innerHeight;
             document.documentElement.style.setProperty('--app-height', `${h}px`);
         }
 
         window.addEventListener('resize', updateAppHeight);
         window.addEventListener('orientationchange', updateAppHeight);
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', updateAppHeight);
+            window.visualViewport.addEventListener('scroll', updateAppHeight);
+        }
         updateAppHeight();
 
         // Toggle chat sounds mute
