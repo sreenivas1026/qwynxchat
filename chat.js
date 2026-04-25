@@ -176,6 +176,11 @@
             peer.on('open', (id) => {
                 showNotification('Room created! Share code: ' + roomCode, 'success');
                 saveSession();
+
+                // Join Socket.io room for presence tracking
+                if (socket) {
+                    socket.emit('join', { roomCode, username });
+                }
             });
 
             peer.on('connection', (connection) => {
@@ -268,6 +273,11 @@
                 conn.on('open', () => {
                     clearTimeout(connectionTimeout);
                     setupConnection();
+
+                    // Join Socket.io room for presence tracking
+                    if (socket) {
+                        socket.emit('join', { roomCode, username });
+                    }
                 });
                 
                 conn.on('error', (err) => {
@@ -518,7 +528,7 @@
         function sendMessage() {
             const input = document.getElementById('messageInput');
             const message = input.value.trim();
-            
+
             if (!message || !conn || !conn.open) return;
 
             const msgId = 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
@@ -528,6 +538,11 @@
                 msgId: msgId,
                 replyTo: replyTo
             });
+
+            // Notify server for push notification to offline users
+            if (socket && roomCode) {
+                socket.emit('message-sent', { roomCode, username, message });
+            }
 
             displayMessage(message, 'sent', msgId, replyTo);
             input.value = '';
@@ -551,6 +566,98 @@
 
         // Vanish mode - messages disappear
         let isVanishMode = false;
+
+        // Socket.io for online status
+        let socket = null;
+        const SOCKET_SERVER_URL = 'https://qwynxchat.vercel.app';
+
+        // Push notification subscription
+        let pushSubscription = null;
+        const VAPID_PUBLIC_KEY = 'BGnEechzDRM7-vVgkBzMDJPOAvUPD_QnnlSMFo7r6RfHTXX8OtSMp4LKw4WIt2cjF-dwdGt6lamhZ-mf9wapUGU';
+
+        // Register Service Worker and subscribe to push notifications
+        async function registerPushNotifications() {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                return;
+            }
+
+            try {
+                // Register service worker
+                const registration = await navigator.serviceWorker.register('/sw.js');
+                await registration.update();
+
+                // Request permission
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    showNotification('Notification permission denied', 'warning');
+                    return;
+                }
+
+                // Subscribe to push
+                const subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+                });
+
+                pushSubscription = subscription;
+
+                // Send subscription to server
+                if (socket && roomCode) {
+                    socket.emit('register-push', { roomCode, subscription });
+                }
+
+                showNotification('Push notifications enabled', 'success');
+            } catch (error) {
+                showNotification('Push notification error', 'error');
+            }
+        }
+
+        // Convert VAPID key to Uint8Array
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+        }
+
+        // Connect to Socket.io for presence tracking
+        function connectSocket() {
+            if (socket) return;
+
+            socket = io(SOCKET_SERVER_URL);
+
+            socket.on('connect', () => {
+                if (username && roomCode) {
+                    socket.emit('join', { roomCode, username });
+
+                    // Register push subscription if available
+                    if (pushSubscription) {
+                        socket.emit('register-push', { roomCode, subscription: pushSubscription });
+                    }
+                }
+            });
+
+            socket.on('user-online', (data) => {
+                showNotification(`${data.username} is online`, 'success');
+            });
+
+            socket.on('user-offline', (data) => {
+                showNotification(`${data.username} is offline`, 'warning');
+            });
+        }
+
+        // Check if room has online users
+        function checkRoomOnline(roomCode, callback) {
+            if (!socket) {
+                callback({ online: false, count: 0 });
+                return;
+            }
+            socket.emit('check-online', { roomCode }, callback);
+        }
 
         // Display Message
         function displayMessage(message, type, msgId = null, replyMeta = null, skipSave = false) {
@@ -2487,6 +2594,34 @@
 
             const savedTheme = localStorage.getItem('chat-theme') || 'light';
             document.documentElement.setAttribute('data-theme', savedTheme);
+
+            // Connect to Socket.io for presence tracking
+            connectSocket();
+
+            // Register Service Worker for push notifications
+            registerPushNotifications();
+
+            // Check room online status when user types room code
+            const roomCodeInput = document.getElementById('roomCodeInput');
+            if (roomCodeInput) {
+                roomCodeInput.addEventListener('input', function() {
+                    const code = this.value.trim().toUpperCase();
+                    if (code.length === 8) {
+                        checkRoomOnline(code, (data) => {
+                            const statusDiv = document.getElementById('roomOnlineStatus');
+                            const countSpan = document.getElementById('roomOnlineCount');
+                            if (data.online) {
+                                statusDiv.style.display = 'flex';
+                                countSpan.textContent = data.count + ' Online';
+                            } else {
+                                statusDiv.style.display = 'none';
+                            }
+                        });
+                    } else {
+                        document.getElementById('roomOnlineStatus').style.display = 'none';
+                    }
+                });
+            }
 
             // Restore session if exists
             setTimeout(() => {

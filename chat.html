@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="chat.css">
     <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="chat.js"></script>
     <style>
 
@@ -65,7 +66,13 @@
                     <label class="input-label" style="font-weight: 600;">
                         <i class="fas fa-hashtag"></i> Enter 8-Digit Room Code
                     </label>
-                    <input type="text" class="input-field" id="roomCodeInput" placeholder="E.g., 7B5125DC" maxlength="8" style="text-transform: uppercase; font-family: monospace; letter-spacing: 4px; text-align: center; font-size: 24px; font-weight: 700; padding: 16px;">
+                    <div style="position: relative;">
+                        <input type="text" class="input-field" id="roomCodeInput" placeholder="E.g., 7B5125DC" maxlength="8" style="text-transform: uppercase; font-family: monospace; letter-spacing: 4px; text-align: center; font-size: 24px; font-weight: 700; padding: 16px;">
+                        <div id="roomOnlineStatus" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); display: none; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 20px; background: var(--success); color: white;">
+                            <i class="fas fa-circle" style="font-size: 8px;"></i>
+                            <span id="roomOnlineCount">Online</span>
+                        </div>
+                    </div>
                 </div>
                 <button class="btn-primary" id="joinRoomBtn" onclick="joinRoom()">
                     <i class="fas fa-sign-in-alt"></i> Join Room
