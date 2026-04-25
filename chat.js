@@ -35,6 +35,10 @@
         let audioStreams = [];
         let chatSoundsMuted = false;
 
+        // Message selection state for multi-delete
+        let isSelectionMode = false;
+        const selectedMsgIds = new Set();
+
         // Generate 8-digit room code
         function generateRoomCode() {
             const chars = 'ABCDEFGHIJKLMNPQRSTUVWXYZ123456789';
@@ -439,18 +443,7 @@
 
             // Attach gesture handlers (swipe-to-reply + selection)
             attachMessageGestures(wrapper, id, type);
-            
-            // Add long press for touch devices
-            let pressTimer;
-            wrapper.addEventListener('touchstart', (e) => {
-                pressTimer = setTimeout(() => showMessageMenu(e, id, type), 800);
-            });
-            wrapper.addEventListener('touchend', () => clearTimeout(pressTimer));
         }
-
-        // Message selection state
-        let isSelectionMode = false;
-        const selectedMsgIds = new Set();
 
         function ensureReplyUI() {
             const inputArea = document.querySelector('.input-area');
@@ -489,6 +482,7 @@
             textEl.textContent = replyTo.preview || '';
         }
 
+        // Selection toolbar for multi-delete
         function ensureSelectionToolbar() {
             const chatScreen = document.getElementById('chatScreen');
             if (!chatScreen) return;
@@ -499,17 +493,17 @@
             bar.className = 'selection-toolbar';
             bar.style.display = 'none';
             bar.innerHTML = `
-                <button class="sel-btn" id="selCancel" type="button">Cancel</button>
+                <button class="sel-btn" id="selDeleteMe" type="button"><i class="fas fa-trash"></i> For Me</button>
                 <div class="sel-count" id="selCount">0</div>
-                <button class="sel-btn danger" id="selDelete" type="button">Delete</button>
+                <button class="sel-btn danger" id="selDeleteAll" type="button"><i class="fas fa-trash-alt"></i> For All</button>
+                <button class="sel-btn close" id="selClose" type="button"><i class="fas fa-times"></i></button>
             `;
 
             chatScreen.appendChild(bar);
 
-            document.getElementById('selCancel').addEventListener('click', exitSelectionMode);
-            document.getElementById('selDelete').addEventListener('click', () => {
-                deleteSelectedMessages('me');
-            });
+            document.getElementById('selClose').addEventListener('click', exitSelectionMode);
+            document.getElementById('selDeleteMe').addEventListener('click', () => deleteSelectedMessages('me'));
+            document.getElementById('selDeleteAll').addEventListener('click', () => deleteSelectedMessages('everyone'));
         }
 
         function setSelectionMode(enabled) {
@@ -544,7 +538,7 @@
             }
             updateSelectionToolbar();
             if (selectedMsgIds.size === 0) {
-                setSelectionMode(false);
+                exitSelectionMode();
             }
         }
 
@@ -566,7 +560,8 @@
 
             const bubble = wrapper.querySelector('.message-bubble');
 
-            // Long press: enter selection mode + select this message
+            // Long press: enter selection mode and select this message
+            let longPressTriggered = false;
             wrapper.addEventListener('touchstart', (e) => {
                 if (!e.touches || e.touches.length !== 1) return;
                 const t = e.touches[0];
@@ -574,13 +569,15 @@
                 startY = t.clientY;
                 active = true;
                 swiped = false;
+                longPressTriggered = false;
 
                 clearTimeout(longPressTimer);
                 longPressTimer = setTimeout(() => {
                     if (!active || swiped) return;
+                    longPressTriggered = true;
                     setSelectionMode(true);
                     toggleMessageSelected(wrapper);
-                }, 550);
+                }, 500);
             }, { passive: true });
 
             wrapper.addEventListener('touchmove', (e) => {
@@ -615,8 +612,13 @@
                     bubble.style.transform = 'translateX(0px)';
                 }
 
+                // Skip if long-press just triggered selection (don't toggle again)
+                if (longPressTriggered) {
+                    return;
+                }
+
                 if (isSelectionMode) {
-                    // tap toggles selection
+                    // In selection mode, tap toggles selection
                     toggleMessageSelected(wrapper);
                     return;
                 }
@@ -637,7 +639,7 @@
                 }
             });
 
-            // Desktop: Ctrl/click selection fallback
+            // Desktop: Ctrl+click to toggle selection
             wrapper.addEventListener('click', (e) => {
                 if (!isSelectionMode) return;
                 e.preventDefault();
@@ -913,7 +915,7 @@
             wrapper.innerHTML = `
                 <div class="message">
                     <div class="message-bubble audio-bubble">
-                        <audio controls src="data:audio/webm;base64,${base64Audio}" style="height: 36px; max-width: 200px;"></audio>
+                        <audio controls src="data:audio/webm;base64,${base64Audio}"></audio>
                         <span class="audio-duration">${duration}</span>
                     </div>
                     <div class="message-time">${time}</div>
@@ -922,6 +924,9 @@
             
             messagesArea.appendChild(wrapper);
             messagesArea.scrollTop = messagesArea.scrollHeight;
+            
+            // Attach gesture handlers (swipe-to-reply + selection)
+            attachMessageGestures(wrapper, id, type);
         }
 
         // Show message context menu
@@ -955,14 +960,9 @@
                 </div>`;
             }
             
-            menuHTML += `<div class="menu-item" onclick="deleteMessage('${msgId}', 'me')" style="padding: 10px 16px; cursor: pointer; font-size: 14px;">
-                <i class="fas fa-trash" style="margin-right: 8px; width: 16px;"></i> Delete for Me
-            </div>`;
-            
-            if (type === 'sent') {
-                menuHTML += `<div class="menu-item" onclick="deleteMessage('${msgId}', 'everyone')" style="padding: 10px 16px; cursor: pointer; font-size: 14px; color: var(--danger);">
-                    <i class="fas fa-trash-alt" style="margin-right: 8px; width: 16px;"></i> Delete for Everyone
-                </div>`;
+            // Only show menu if there's something to display
+            if (!menuHTML) {
+                return; // No menu needed for normal messages
             }
             
             menu.innerHTML = menuHTML;
