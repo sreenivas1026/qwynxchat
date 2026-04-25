@@ -863,12 +863,28 @@
             color: var(--text-tertiary);
             margin-top: 4px;
             padding: 0 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
         }
 
-        .message-bubble.encrypted {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            font-style: italic;
+        .seen-status {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            opacity: 0.6;
+        }
+
+        .seen-status.seen {
+            color: #4ade80;
+            opacity: 1;
+        }
+
+        .peer-status.away {
+            color: #f59e0b;
+        }
+
+        .peer-status.offline {
+            color: #ef4444;
         }
 
         .audio-bubble {
@@ -1794,4 +1810,11 @@
             background: rgba(255,255,255,0.15);
             padding: 5px 8px;
             border-radius: 8px;
+        }
+
+        /* Vanish mode - messages become invisible */
+        .message-wrapper.vanished {
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
         }

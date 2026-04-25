@@ -39,6 +39,59 @@
         let isSelectionMode = false;
         const selectedMsgIds = new Set();
 
+        // Session persistence
+        const SESSION_KEY = 'qwnyx_chat_session';
+        let isRestoringSession = false; // Flag to prevent UI updates during session restore
+        let sessionRestored = false; // Flag to track if session was restored
+        let reconnectionInterval = null; // Retry interval for reconnection
+
+        function saveSession() {
+            const session = {
+                username,
+                roomCode,
+                isCreator,
+                peerUsername,
+                timestamp: Date.now()
+            };
+            localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+        }
+
+        function loadSession() {
+            const saved = localStorage.getItem(SESSION_KEY);
+            if (!saved) {
+                return null;
+            }
+            try {
+                const session = JSON.parse(saved);
+                // Session persists indefinitely until user leaves
+                return session;
+            } catch (e) {
+                clearSession();
+                return null;
+            }
+        }
+
+        function clearSession() {
+            localStorage.removeItem(SESSION_KEY);
+            localStorage.removeItem(SESSION_KEY + '_messages');
+        }
+
+        // Save messages to localStorage
+        function saveMessages(messages) {
+            localStorage.setItem(SESSION_KEY + '_messages', JSON.stringify(messages));
+        }
+
+        // Load messages from localStorage
+        function loadMessages() {
+            const saved = localStorage.getItem(SESSION_KEY + '_messages');
+            if (!saved) return [];
+            try {
+                return JSON.parse(saved);
+            } catch (e) {
+                return [];
+            }
+        }
+
         // Generate 8-digit room code
         function generateRoomCode() {
             const chars = 'ABCDEFGHIJKLMNPQRSTUVWXYZ123456789';
@@ -86,21 +139,35 @@
 
         // Create Room
         async function createRoom() {
-            username = document.getElementById('createUsername').value.trim();
+            // Only get from input if username not already set (e.g., from session restore)
+            if (!username) {
+                username = document.getElementById('createUsername').value.trim();
+            }
             if (!username) {
                 showNotification('Please enter your name', 'error');
                 return;
             }
 
             isCreator = true;
-            
-            // Generate 8-digit room code
-            roomCode = generateRoomCode();
+
+            // Generate 8-digit room code only if not already set (e.g., from session restore)
+            if (!roomCode) {
+                roomCode = generateRoomCode();
+            }
             document.getElementById('roomCode').textContent = roomCode;
             document.getElementById('codeDisplay').classList.add('show');
-            
+
             // Convert 8-digit code to deterministic PeerID
             const peerId = await codeToPeerId(roomCode);
+
+            // If peer already exists (from failed reconnect), destroy it first
+            if (peer) {
+                try {
+                    peer.destroy();
+                } catch (e) {}
+                peer = null;
+            }
+
             // Initialize PeerJS with deterministic ID from hash
             peer = new Peer(peerId, {
                 config: rtcConfiguration
@@ -108,11 +175,13 @@
 
             peer.on('open', (id) => {
                 showNotification('Room created! Share code: ' + roomCode, 'success');
+                saveSession();
             });
 
             peer.on('connection', (connection) => {
                 conn = connection;
                 setupConnection();
+                saveSession();
             });
 
             // Handle incoming media calls
@@ -127,7 +196,25 @@
 
             peer.on('error', (err) => {
                 if (err.type === 'unavailable-id') {
-                    showNotification('Room code already in use. Try a different one.', 'error');
+                    document.getElementById('peerStatus').textContent = 'new code...';
+                    // Destroy the failed peer
+                    if (peer) {
+                        try {
+                            peer.destroy();
+                        } catch (e) {}
+                        peer = null;
+                    }
+                    // Generate new room code
+                    roomCode = generateRoomCode();
+                    document.getElementById('roomCode').textContent = roomCode;
+                    document.getElementById('codeDisplay').classList.add('show');
+                    showNotification('New room code: ' + roomCode + '. Share with your friend.', 'success');
+                    // Try creating with new code after 1 second
+                    setTimeout(() => {
+                        if (isRestoringSession || document.getElementById('chatScreen').classList.contains('active')) {
+                            createRoom();
+                        }
+                    }, 1000);
                 } else {
                     showNotification('Connection error. Please try again.', 'error');
                 }
@@ -136,8 +223,11 @@
 
         // Join Room
         async function joinRoom() {
-            username = document.getElementById('joinUsername').value.trim();
-            const inputCode = document.getElementById('roomCodeInput').value.trim().toUpperCase();
+            // Only get from input if username/roomCode not already set (e.g., from session restore)
+            if (!username) {
+                username = document.getElementById('joinUsername').value.trim();
+            }
+            const inputCode = roomCode || document.getElementById('roomCodeInput').value.trim().toUpperCase();
 
             if (!username) {
                 showNotification('Please enter your name', 'error');
@@ -151,10 +241,10 @@
 
             isCreator = false;
             roomCode = inputCode;
-            
+
             // Compute the SAME PeerID that creator has (deterministic from code)
             const creatorPeerId = await codeToPeerId(roomCode);
-            
+
             document.getElementById('peerName').textContent = 'Connecting...';
             document.getElementById('joinRoomBtn').disabled = true;
 
@@ -222,6 +312,8 @@
                     type: 'username',
                     username: username
                 });
+                // Save session
+                saveSession();
                 // Show chat screen
                 showChatScreen();
             };
@@ -237,17 +329,40 @@
             conn.on('data', handleIncomingData);
 
             conn.on('close', () => {
-                showNotification('Connection lost', 'warning');
+                // Don't close chat screen on connection lost - user can manually reconnect
                 updateOnlineStatus(false);
-                document.getElementById('chatScreen').classList.remove('active');
-                document.getElementById('setupScreen').classList.add('active');
+                document.getElementById('peerStatus').textContent = 'disconnected';
+                showNotification('Connection lost. Reconnecting...', 'warning');
+
+                // If joiner and connection lost, destroy peer to free up creator's PeerID on server
+                if (!isCreator && peer) {
+                    try {
+                        peer.destroy();
+                    } catch (e) {}
+                    peer = null;
+                }
+
+                // If joiner and connection lost, try to reconnect
+                if (!isCreator && !isRestoringSession) {
+                    setTimeout(() => {
+                        if (document.getElementById('chatScreen').classList.contains('active')) {
+                            joinRoom().catch(() => {
+                                // If reconnection fails, clear session so user can enter new room code
+                                clearSession();
+                                showNotification('Reconnection failed. Creator may have new room code.', 'warning');
+                                document.getElementById('chatScreen').classList.remove('active');
+                                document.getElementById('setupScreen').classList.add('active');
+                            });
+                        }
+                    }, 3000);
+                }
             });
 
             conn.on('error', (err) => {
-                showNotification('Connection error.', 'error');
+                // Don't close chat screen on connection error - user can manually reconnect
                 updateOnlineStatus(false);
-                document.getElementById('chatScreen').classList.remove('active');
-                document.getElementById('setupScreen').classList.add('active');
+                document.getElementById('peerStatus').textContent = 'error';
+                showNotification('Connection error. Reconnecting...', 'error');
             });
         }
 
@@ -301,6 +416,34 @@
                 case 'mute-status':
                     // Update remote mute indicator
                     updateRemoteMuteIndicator(data.isMuted);
+                    break;
+                case 'seen':
+                    // Mark message as seen
+                    const seenEl = document.getElementById('seen-' + data.msgId);
+                    if (seenEl) {
+                        seenEl.textContent = '✓✓';
+                        seenEl.classList.add('seen');
+                    }
+                    break;
+                case 'status':
+                    // Update peer status (online/away/offline)
+                    updatePeerStatus(data.status);
+                    break;
+                case 'leave':
+                    // Other person left the chat
+                    showNotification(data.message || 'Other person has left the chat. Please recreate room.', 'warning');
+                    document.getElementById('peerStatus').textContent = 'left';
+                    document.getElementById('onlineIndicator').style.display = 'none';
+                    // Clear connection
+                    if (conn) {
+                        conn.close();
+                        conn = null;
+                    }
+                    // Clear reconnection interval
+                    if (reconnectionInterval) {
+                        clearInterval(reconnectionInterval);
+                        reconnectionInterval = null;
+                    }
                     break;
                 case 'secret-mode':
                     // Sync secret mode from other peer
@@ -362,6 +505,7 @@
             document.getElementById('chatScreen').classList.add('active');
             document.getElementById('onlineIndicator').style.display = 'block';
             loadChatTheme();
+            setupVanishModeTrigger();
         }
 
         // Update Peer Display
@@ -396,8 +540,20 @@
         let isEncryptionEnabled = false;
         const encryptedMessages = new Map();
 
+        // Message seen receipts
+        const seenMessages = new Set(); // Track which messages have been seen
+
+        // Away status tracking
+        let isAway = false;
+
+        // Online/offline status
+        let isOnline = true;
+
+        // Vanish mode - messages disappear
+        let isVanishMode = false;
+
         // Display Message
-        function displayMessage(message, type, msgId = null, replyMeta = null) {
+        function displayMessage(message, type, msgId = null, replyMeta = null, skipSave = false) {
             const messagesArea = document.getElementById('messagesArea');
             const wrapper = document.createElement('div');
             wrapper.className = `message-wrapper ${type}`;
@@ -432,9 +588,12 @@
             }
             
             wrapper.innerHTML = `
-                <div class="message" oncontextmenu="showMessageMenu(event, '${id}', '${type}')">
-                    <div class="message-bubble ${isEncrypted ? 'encrypted' : ''}" id="bubble-${id}">${replyHtml}<div class="message-text">${escapeHtml(displayText)}</div></div>
-                    <div class="message-time">${time}</div>
+                <div class="message">
+                    <div class="message-bubble ${isEncrypted ? 'encrypted' : ''}" id="bubble-${id}" data-msg-id="${id}">${replyHtml}<div class="message-text">${escapeHtml(displayText)}</div></div>
+                    <div class="message-time">
+                        ${time}
+                        ${type === 'sent' ? `<span class="seen-status" id="seen-${id}"></span>` : ''}
+                    </div>
                 </div>
             `;
 
@@ -443,6 +602,77 @@
 
             // Attach gesture handlers (swipe-to-reply + selection)
             attachMessageGestures(wrapper, id, type);
+
+            // Send seen receipt for received messages
+            if (type === 'received' && conn && conn.open) {
+                conn.send({ type: 'seen', msgId: id });
+            }
+
+            // Save message to localStorage for persistence (skip if restoring)
+            if (!skipSave) {
+                const savedMessages = loadMessages();
+                savedMessages.push({ message, type, msgId: id, replyMeta, time, isEncrypted });
+                saveMessages(savedMessages);
+            }
+
+            // Apply vanish mode if active
+            if (isVanishMode) {
+                wrapper.classList.add('vanished');
+            }
+        }
+
+        // Toggle vanish mode
+        function toggleVanishMode() {
+            isVanishMode = !isVanishMode;
+
+            if (isVanishMode) {
+                // Make all existing messages vanish immediately
+                document.querySelectorAll('.message-wrapper').forEach(wrapper => {
+                    wrapper.classList.add('vanished');
+                });
+                showNotification('Vanish mode ON', 'info');
+            } else {
+                // Remove vanish effect from all messages
+                document.querySelectorAll('.message-wrapper').forEach(wrapper => {
+                    wrapper.classList.remove('vanished');
+                });
+                showNotification('Vanish mode OFF', 'info');
+            }
+        }
+
+        // Triple-tap detection for vanish mode
+        let tapCount = 0;
+        let tapTimeout = null;
+
+        function setupVanishModeTrigger() {
+            const chatScreen = document.getElementById('chatScreen');
+            if (!chatScreen) return;
+
+            chatScreen.addEventListener('click', (e) => {
+                // Ignore clicks on interactive elements
+                if (e.target.closest('button') || e.target.closest('input') || e.target.closest('textarea')) {
+                    return;
+                }
+
+                tapCount++;
+
+                if (tapCount === 3) {
+                    toggleVanishMode();
+                    tapCount = 0;
+                    if (tapTimeout) {
+                        clearTimeout(tapTimeout);
+                        tapTimeout = null;
+                    }
+                } else {
+                    // Reset tap count after 1 second if 3 taps not reached
+                    if (tapTimeout) {
+                        clearTimeout(tapTimeout);
+                    }
+                    tapTimeout = setTimeout(() => {
+                        tapCount = 0;
+                    }, 1000);
+                }
+            });
         }
 
         function ensureReplyUI() {
@@ -766,6 +996,17 @@
 
         // Disconnect chat
         function disconnectChat() {
+            // Notify other person before disconnecting
+            if (conn && conn.open) {
+                conn.send({ type: 'leave', message: 'User has left the chat' });
+            }
+
+            // Clear reconnection interval
+            if (reconnectionInterval) {
+                clearInterval(reconnectionInterval);
+                reconnectionInterval = null;
+            }
+
             if (conn) {
                 conn.close();
                 conn = null;
@@ -781,6 +1022,8 @@
             // Go back to setup
             document.getElementById('chatScreen').classList.remove('active');
             document.getElementById('setupScreen').classList.add('active');
+            // Clear session (user explicitly left)
+            clearSession();
             showNotification('Chat ended', 'info');
         }
 
@@ -1048,7 +1291,7 @@
         // Update online/offline status
         function updateOnlineStatus(isOnline) {
             const status = document.getElementById('peerStatus');
-            
+
             if (isOnline) {
                 status?.classList.remove('offline');
                 status.textContent = 'online';
@@ -1057,6 +1300,66 @@
                 status.textContent = 'offline';
             }
         }
+
+        // Update peer status (online/away/offline)
+        function updatePeerStatus(status) {
+            const statusEl = document.getElementById('peerStatus');
+            if (!statusEl) return;
+
+            statusEl.classList.remove('online', 'offline', 'away');
+
+            switch (status) {
+                case 'online':
+                    statusEl.classList.add('online');
+                    statusEl.textContent = 'online';
+                    break;
+                case 'away':
+                    statusEl.classList.add('away');
+                    statusEl.textContent = 'away';
+                    break;
+                case 'offline':
+                    statusEl.classList.add('offline');
+                    statusEl.textContent = 'offline';
+                    break;
+            }
+        }
+
+        // Send status to peer
+        function sendStatus(status) {
+            if (conn && conn.open) {
+                conn.send({ type: 'status', status: status });
+            }
+        }
+
+        // Page visibility API - detect when user is away
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                // User is away (tab hidden/minimized)
+                isAway = true;
+                sendStatus('away');
+            } else {
+                // User is back (tab visible)
+                isAway = false;
+                if (isOnline) {
+                    sendStatus('online');
+                }
+            }
+        });
+
+        // Online/offline event listeners
+        window.addEventListener('online', () => {
+            isOnline = true;
+            if (!isAway) {
+                sendStatus('online');
+            }
+            showNotification('You are back online', 'success');
+        });
+
+        window.addEventListener('offline', () => {
+            isOnline = false;
+            sendStatus('offline');
+            showNotification('You are offline', 'warning');
+        });
 
         // Voice/Video Calls
         async function startVoiceCall() {
@@ -1089,9 +1392,7 @@
             }
 
             try {
-                // First send a call request to check if other person is available
-                conn.send({ type: 'call-request', isVideo: isVideo });
-
+                // Get user media first (faster - parallel with call setup)
                 localStream = await navigator.mediaDevices.getUserMedia({
                     video: isVideo,
                     audio: {
@@ -1105,6 +1406,9 @@
                         voiceIsolation: { ideal: true }
                     }
                 });
+
+                // Send call request immediately after getting media
+                conn.send({ type: 'call-request', isVideo: isVideo });
 
                 // Show local video
                 const localVideo = document.getElementById('localVideo');
@@ -2170,14 +2474,95 @@
             }, 2500);
         }
 
-        // Auto-resize textarea
-        document.getElementById('messageInput').addEventListener('input', function() {
-            this.style.height = 'auto';
-            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-        });
-
         // Load saved theme
         window.addEventListener('DOMContentLoaded', () => {
+            // Auto-resize textarea - moved inside DOMContentLoaded
+            const messageInput = document.getElementById('messageInput');
+            if (messageInput) {
+                messageInput.addEventListener('input', function() {
+                    this.style.height = 'auto';
+                    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+                });
+            }
+
             const savedTheme = localStorage.getItem('chat-theme') || 'light';
             document.documentElement.setAttribute('data-theme', savedTheme);
+
+            // Restore session if exists
+            setTimeout(() => {
+                const session = loadSession();
+                if (session && session.username && session.roomCode) {
+                    username = session.username;
+                    roomCode = session.roomCode;
+                    isCreator = session.isCreator;
+                    peerUsername = session.peerUsername || '';
+
+                    // Show chat screen immediately
+                    document.getElementById('setupScreen').classList.remove('active');
+                    document.getElementById('chatScreen').classList.add('active');
+                    document.getElementById('peerName').textContent = peerUsername || 'Reconnecting...';
+                    document.getElementById('avatarInitial').textContent = (peerUsername || '?').charAt(0).toUpperCase();
+                    document.getElementById('peerStatus').textContent = 'reconnecting';
+                    document.getElementById('onlineIndicator').style.display = 'none';
+
+                    showNotification('Reconnecting...', 'info');
+
+                    // Restore messages from localStorage
+                    const savedMessages = loadMessages();
+                    savedMessages.forEach(msg => {
+                        displayMessage(msg.message, msg.type, msg.msgId, msg.replyMeta, true);
+                    });
+
+                    // Auto-reconnect with retry logic
+                    isRestoringSession = true;
+                    let retryCount = 0;
+                    const maxRetries = 9999; // Keep trying indefinitely
+
+                    function attemptReconnect() {
+                        if (retryCount >= maxRetries) return;
+
+                        retryCount++;
+
+                        if (isCreator) {
+                            createRoom().then(() => {
+                                isRestoringSession = false;
+                                showNotification('Reconnected!', 'success');
+                                if (reconnectionInterval) {
+                                    clearInterval(reconnectionInterval);
+                                    reconnectionInterval = null;
+                                }
+                            }).catch(() => {
+                                document.getElementById('peerStatus').textContent = 'reconnecting';
+                                // Retry after 3 seconds
+                            });
+                        } else {
+                            joinRoom().then(() => {
+                                isRestoringSession = false;
+                                showNotification('Reconnected!', 'success');
+                                if (reconnectionInterval) {
+                                    clearInterval(reconnectionInterval);
+                                    reconnectionInterval = null;
+                                }
+                            }).catch(() => {
+                                document.getElementById('peerStatus').textContent = 'reconnecting';
+                                // Retry after 3 seconds
+                            });
+                        }
+                    }
+
+                    // Start reconnection attempts
+                    setTimeout(attemptReconnect, 500);
+
+                    // Retry every 5 seconds until successful
+                    reconnectionInterval = setInterval(() => {
+                        if (conn && conn.open) {
+                            clearInterval(reconnectionInterval);
+                            reconnectionInterval = null;
+                            isRestoringSession = false;
+                        } else {
+                            attemptReconnect();
+                        }
+                    }, 5000);
+                }
+            }, 500);
         });
