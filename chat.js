@@ -37,7 +37,7 @@
 
         // Generate 8-digit room code
         function generateRoomCode() {
-            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            const chars = 'ABCDEFGHIJKLMNPQRSTUVWXYZ123456789';
             let code = '';
             for (let i = 0; i < 8; i++) {
                 code += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -66,6 +66,17 @@
             } else {
                 document.querySelectorAll('.tab')[1].classList.add('active');
                 document.getElementById('joinPanel').classList.add('active');
+            }
+        }
+
+        function deleteMessage(msgId, scope = 'me') {
+            if (!msgId) return;
+
+            const wrapper = document.querySelector(`[data-msg-id="${msgId}"]`);
+            if (wrapper) wrapper.remove();
+
+            if (scope === 'everyone' && conn && conn.open) {
+                conn.send({ type: 'delete', msgId });
             }
         }
 
@@ -244,7 +255,7 @@
                     updatePeerDisplay();
                     break;
                 case 'message':
-                    displayMessage(data.message, 'received');
+                    displayMessage(data.message, 'received', data.msgId || null, data.replyTo || null);
                     playMessageSound(); // Play notification sound
                     hideTypingIndicator();
                     break;
@@ -362,14 +373,19 @@
             
             if (!message || !conn || !conn.open) return;
 
+            const msgId = 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
             conn.send({
                 type: 'message',
-                message: message
+                message: message,
+                msgId: msgId,
+                replyTo: replyTo
             });
 
-            displayMessage(message, 'sent');
+            displayMessage(message, 'sent', msgId, replyTo);
             input.value = '';
             input.style.height = 'auto';
+            replyTo = null;
+            updateReplyStrip();
         }
 
         // Message encryption state
@@ -377,7 +393,7 @@
         const encryptedMessages = new Map();
 
         // Display Message
-        function displayMessage(message, type, msgId = null) {
+        function displayMessage(message, type, msgId = null, replyMeta = null) {
             const messagesArea = document.getElementById('messagesArea');
             const wrapper = document.createElement('div');
             wrapper.className = `message-wrapper ${type}`;
@@ -394,16 +410,35 @@
                 isEncrypted = true;
                 encryptedMessages.set(id, message);
             }
+
+            let replyHtml = '';
+            if (replyMeta && replyMeta.msgId) {
+                const repliedBubble = document.getElementById('bubble-' + replyMeta.msgId);
+                const repliedText = (replyMeta.preview || repliedBubble?.textContent || '').trim();
+                const replyLabel = replyMeta.type === 'sent' ? 'You' : (peerUsername || 'User');
+                replyHtml = `
+                    <div class="reply-quote ${type}">
+                        <div class="reply-quote-bar"></div>
+                        <div class="reply-quote-body">
+                            <div class="reply-quote-title">${escapeHtml(replyLabel)}</div>
+                            <div class="reply-quote-text">${escapeHtml(repliedText).slice(0, 120)}</div>
+                        </div>
+                    </div>
+                `;
+            }
             
             wrapper.innerHTML = `
                 <div class="message" oncontextmenu="showMessageMenu(event, '${id}', '${type}')">
-                    <div class="message-bubble ${isEncrypted ? 'encrypted' : ''}" id="bubble-${id}">${escapeHtml(displayText)}</div>
+                    <div class="message-bubble ${isEncrypted ? 'encrypted' : ''}" id="bubble-${id}">${replyHtml}<div class="message-text">${escapeHtml(displayText)}</div></div>
                     <div class="message-time">${time}</div>
                 </div>
             `;
 
             messagesArea.appendChild(wrapper);
             messagesArea.scrollTop = messagesArea.scrollHeight;
+
+            // Attach gesture handlers (swipe-to-reply + selection)
+            attachMessageGestures(wrapper, id, type);
             
             // Add long press for touch devices
             let pressTimer;
@@ -411,6 +446,203 @@
                 pressTimer = setTimeout(() => showMessageMenu(e, id, type), 800);
             });
             wrapper.addEventListener('touchend', () => clearTimeout(pressTimer));
+        }
+
+        // Message selection state
+        let isSelectionMode = false;
+        const selectedMsgIds = new Set();
+
+        function ensureReplyUI() {
+            const inputArea = document.querySelector('.input-area');
+            if (!inputArea) return;
+            if (document.getElementById('replyStrip')) return;
+
+            const replyStrip = document.createElement('div');
+            replyStrip.id = 'replyStrip';
+            replyStrip.className = 'reply-strip';
+            replyStrip.style.display = 'none';
+            replyStrip.innerHTML = `
+                <div class="reply-strip-content">
+                    <div class="reply-strip-title">Replying</div>
+                    <div class="reply-strip-text" id="replyStripText"></div>
+                </div>
+                <button class="reply-strip-close" id="replyStripClose" type="button">&times;</button>
+            `;
+
+            inputArea.insertBefore(replyStrip, inputArea.firstChild);
+
+            document.getElementById('replyStripClose').addEventListener('click', () => {
+                replyTo = null;
+                updateReplyStrip();
+            });
+        }
+
+        function updateReplyStrip() {
+            const strip = document.getElementById('replyStrip');
+            const textEl = document.getElementById('replyStripText');
+            if (!strip || !textEl) return;
+            if (!replyTo) {
+                strip.style.display = 'none';
+                return;
+            }
+            strip.style.display = 'flex';
+            textEl.textContent = replyTo.preview || '';
+        }
+
+        function ensureSelectionToolbar() {
+            const chatScreen = document.getElementById('chatScreen');
+            if (!chatScreen) return;
+            if (document.getElementById('selectionToolbar')) return;
+
+            const bar = document.createElement('div');
+            bar.id = 'selectionToolbar';
+            bar.className = 'selection-toolbar';
+            bar.style.display = 'none';
+            bar.innerHTML = `
+                <button class="sel-btn" id="selCancel" type="button">Cancel</button>
+                <div class="sel-count" id="selCount">0</div>
+                <button class="sel-btn danger" id="selDelete" type="button">Delete</button>
+            `;
+
+            chatScreen.appendChild(bar);
+
+            document.getElementById('selCancel').addEventListener('click', exitSelectionMode);
+            document.getElementById('selDelete').addEventListener('click', () => {
+                deleteSelectedMessages('me');
+            });
+        }
+
+        function setSelectionMode(enabled) {
+            isSelectionMode = enabled;
+            const bar = document.getElementById('selectionToolbar');
+            if (bar) bar.style.display = enabled ? 'flex' : 'none';
+            if (!enabled) {
+                selectedMsgIds.clear();
+                document.querySelectorAll('.message-wrapper.selected').forEach(el => el.classList.remove('selected'));
+            }
+            updateSelectionToolbar();
+        }
+
+        function exitSelectionMode() {
+            setSelectionMode(false);
+        }
+
+        function updateSelectionToolbar() {
+            const countEl = document.getElementById('selCount');
+            if (countEl) countEl.textContent = `${selectedMsgIds.size}`;
+        }
+
+        function toggleMessageSelected(wrapperEl) {
+            const id = wrapperEl?.dataset?.msgId;
+            if (!id) return;
+            if (selectedMsgIds.has(id)) {
+                selectedMsgIds.delete(id);
+                wrapperEl.classList.remove('selected');
+            } else {
+                selectedMsgIds.add(id);
+                wrapperEl.classList.add('selected');
+            }
+            updateSelectionToolbar();
+            if (selectedMsgIds.size === 0) {
+                setSelectionMode(false);
+            }
+        }
+
+        function deleteSelectedMessages(scope) {
+            const ids = Array.from(selectedMsgIds);
+            ids.forEach((id) => deleteMessage(id, scope));
+            setSelectionMode(false);
+        }
+
+        function attachMessageGestures(wrapper, msgId, type) {
+            ensureReplyUI();
+            ensureSelectionToolbar();
+
+            let startX = 0;
+            let startY = 0;
+            let active = false;
+            let swiped = false;
+            let longPressTimer;
+
+            const bubble = wrapper.querySelector('.message-bubble');
+
+            // Long press: enter selection mode + select this message
+            wrapper.addEventListener('touchstart', (e) => {
+                if (!e.touches || e.touches.length !== 1) return;
+                const t = e.touches[0];
+                startX = t.clientX;
+                startY = t.clientY;
+                active = true;
+                swiped = false;
+
+                clearTimeout(longPressTimer);
+                longPressTimer = setTimeout(() => {
+                    if (!active || swiped) return;
+                    setSelectionMode(true);
+                    toggleMessageSelected(wrapper);
+                }, 550);
+            }, { passive: true });
+
+            wrapper.addEventListener('touchmove', (e) => {
+                if (!active || !e.touches || e.touches.length !== 1) return;
+                const t = e.touches[0];
+                const dx = t.clientX - startX;
+                const dy = t.clientY - startY;
+
+                // Cancel long press if user is scrolling
+                if (Math.abs(dy) > 10) {
+                    clearTimeout(longPressTimer);
+                }
+
+                // Horizontal swipe detection
+                if (Math.abs(dx) > 25 && Math.abs(dx) > Math.abs(dy)) {
+                    swiped = true;
+                    clearTimeout(longPressTimer);
+                    if (bubble) {
+                        bubble.style.transform = `translateX(${Math.min(60, Math.max(0, dx))}px)`;
+                        bubble.style.transition = 'none';
+                    }
+                }
+            }, { passive: true });
+
+            wrapper.addEventListener('touchend', (e) => {
+                clearTimeout(longPressTimer);
+                if (!active) return;
+                active = false;
+
+                if (bubble) {
+                    bubble.style.transition = 'transform 180ms ease';
+                    bubble.style.transform = 'translateX(0px)';
+                }
+
+                if (isSelectionMode) {
+                    // tap toggles selection
+                    toggleMessageSelected(wrapper);
+                    return;
+                }
+
+                if (swiped && bubble) {
+                    // treat as swipe-to-reply only if swipe is right
+                    const touch = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : null;
+                    if (touch) {
+                        const dx = touch.clientX - startX;
+                        if (dx > 45) {
+                            const bubbleEl = document.getElementById('bubble-' + msgId);
+                            const preview = (bubbleEl?.textContent || '').trim().slice(0, 80);
+                            replyTo = { msgId, type, preview };
+                            updateReplyStrip();
+                            document.getElementById('messageInput')?.focus?.();
+                        }
+                    }
+                }
+            });
+
+            // Desktop: Ctrl/click selection fallback
+            wrapper.addEventListener('click', (e) => {
+                if (!isSelectionMode) return;
+                e.preventDefault();
+                toggleMessageSelected(wrapper);
+            });
         }
 
         // Display Call Log
@@ -1949,5 +2181,3 @@
             const savedTheme = localStorage.getItem('chat-theme') || 'light';
             document.documentElement.setAttribute('data-theme', savedTheme);
         });
-
-  

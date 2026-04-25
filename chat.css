@@ -313,7 +313,7 @@
         .header {
             background: var(--bg-primary);
             border-bottom: 1px solid var(--border);
-            padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 16px;
+            padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -500,10 +500,10 @@
             display: none;
             align-items: center;
             justify-content: space-between;
-            padding: 12px 20px;
+            padding: 10px 14px;
             background: var(--bg-secondary);
             border-radius: 24px;
-            margin: 0 16px 12px;
+            margin: 8px 0 0;
             animation: slideIn 0.3s ease;
         }
 
@@ -703,6 +703,75 @@
             writing-mode: horizontal-tb;
         }
 
+        .reply-quote {
+            display: flex;
+            gap: 10px;
+            padding: 10px 10px;
+            border-radius: 14px;
+            margin-bottom: 8px;
+            background: rgba(255,255,255,0.18);
+            border: 1px solid rgba(255,255,255,0.22);
+        }
+
+        .message-wrapper.received .reply-quote {
+            background: rgba(0,0,0,0.05);
+            border: 1px solid rgba(0,0,0,0.06);
+        }
+
+        .reply-quote-bar {
+            width: 4px;
+            border-radius: 999px;
+            background: linear-gradient(180deg, rgba(0,132,255,1) 0%, rgba(82,170,255,1) 100%);
+            flex-shrink: 0;
+        }
+
+        .message-wrapper.sent .reply-quote-bar {
+            background: linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.55) 100%);
+        }
+
+        .reply-quote-body {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .reply-quote-title {
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.2px;
+            opacity: 0.95;
+            margin-bottom: 2px;
+        }
+
+        .message-wrapper.received .reply-quote-title {
+            color: var(--accent);
+        }
+
+        .message-wrapper.sent .reply-quote-title {
+            color: rgba(255,255,255,0.95);
+        }
+
+        .reply-quote-text {
+            font-size: 12px;
+            opacity: 0.9;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 48vw;
+        }
+
+        .message-wrapper.sent .reply-quote-text {
+            color: rgba(255,255,255,0.9);
+        }
+
+        .message-wrapper.received .reply-quote-text {
+            color: var(--text-secondary);
+        }
+
+        .message-text {
+            display: block;
+        }
+
         .message-bubble:active {
             opacity: 0.8;
         }
@@ -722,8 +791,18 @@
         .audio-bubble {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
+            gap: 10px;
+            padding: 10px 14px;
+            border-radius: 24px;
+            overflow: hidden;
+            min-width: 200px;
+        }
+
+        .audio-bubble audio {
+            border-radius: 999px;
+            overflow: hidden;
+            flex: 1;
+            min-width: 160px;
         }
 
         .audio-duration {
@@ -860,8 +939,8 @@
         }
 
         .input-area {
-            padding: 16px 20px;
-            padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+            padding: 10px 16px;
+            padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
             background: var(--bg-primary);
             border-top: 1px solid var(--border);
         }
@@ -1612,4 +1691,91 @@
                 bottom: 80px;
                 right: 10px;
             }
+        }
+
+        .reply-strip {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            margin-bottom: 8px;
+        }
+
+        .reply-strip-content {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .reply-strip-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--accent);
+            line-height: 1.1;
+        }
+
+        .reply-strip-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 70vw;
+        }
+
+        .reply-strip-close {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: none;
+            background: var(--bg-primary);
+            color: var(--text-secondary);
+            font-size: 22px;
+            line-height: 28px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .message-wrapper.selected .message-bubble {
+            outline: 2px solid var(--accent);
+            box-shadow: 0 0 0 4px rgba(0, 132, 255, 0.12);
+        }
+
+        .selection-toolbar {
+            position: fixed;
+            left: 12px;
+            right: 12px;
+            bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+            z-index: 12000;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            border-radius: 16px;
+            background: rgba(0,0,0,0.75);
+            backdrop-filter: blur(10px);
+            color: #fff;
+        }
+
+        .selection-toolbar .sel-btn {
+            border: none;
+            background: rgba(255,255,255,0.14);
+            color: #fff;
+            padding: 10px 12px;
+            border-radius: 12px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .selection-toolbar .sel-btn.danger {
+            background: rgba(255, 59, 48, 0.85);
+        }
+
+        .selection-toolbar .sel-count {
+            font-weight: 800;
+            font-size: 14px;
         }
