@@ -3,15 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>QwynxChat - Premium Private Connection</title>
+    <title>QwynxChat</title>
     <meta name="theme-color" content="#0084ff">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%230084ff'/%3E%3Cstop offset='100%25' stop-color='%230056b3'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M16 4C9.4 4 4 9.4 4 16C4 22.6 9.4 28 16 28C19.2 28 22.1 26.7 24.2 24.6L28 28' stroke='url(%23g)' stroke-width='3' stroke-linecap='round' fill='none'/%3E%3Ccircle cx='12' cy='16' r='1.5' fill='white'/%3E%3Ccircle cx='16' cy='16' r='1.5' fill='white'/%3E%3Ccircle cx='20' cy='16' r='1.5' fill='white'/%3E%3C/svg%3E">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="chat.css">
     <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="chat.js"></script>
     <style>
-
+        /* Logo wave animation */
+        @keyframes wave {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-3px); }
+        }
+        .logo-wave-dot:nth-child(1) { animation: wave 1s ease-in-out infinite; }
+        .logo-wave-dot:nth-child(2) { animation: wave 1s ease-in-out infinite 0.2s; }
+        .logo-wave-dot:nth-child(3) { animation: wave 1s ease-in-out infinite 0.4s; }
     </style>
 </head>
 <body>
@@ -19,10 +27,32 @@
     <div class="setup-screen active" id="setupScreen">
         <div class="setup-card">
             <div class="logo">
-                <div class="logo-icon">
-                    <i class="fas fa-comments" style="color: white; font-size: 32px;"></i>
-                </div>
-                <h1>QwynxChat</h1>
+                <svg width="240" height="60" viewBox="0 0 240 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#0084ff;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#0056b3;stop-opacity:1" />
+                        </linearGradient>
+                        <linearGradient id="textGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#0084ff;stop-opacity:1" />
+                            <stop offset="100%" style="stop-color:#00a8ff;stop-opacity:1" />
+                        </linearGradient>
+                    </defs>
+                    
+                    <!-- Q-shaped bubble with lock inside -->
+                    <g transform="translate(2, 2)">
+                        <!-- Q-shaped outline (original upright position) -->
+                        <path d="M25 8C15.6 8 8 15.6 8 25C8 34.4 15.6 42 25 42C30.5 42 35.4 39.3 38.3 35.2L44 42" stroke="url(#logoGradient)" stroke-width="6" stroke-linecap="round" fill="none"/>
+                        
+                        <!-- Three dot horizontal pattern inside Q -->
+                        <circle cx="20" cy="25" r="1.5" fill="white" class="logo-wave-dot"/>
+                        <circle cx="25" cy="25" r="1.5" fill="white" class="logo-wave-dot"/>
+                        <circle cx="30" cy="25" r="1.5" fill="white" class="logo-wave-dot"/>
+                    </g>
+                    
+                    <!-- QwynxChat Text -->
+                    <text x="60" y="38" font-family="Inter, sans-serif" font-size="26" font-weight="700" fill="url(#textGradient)">QwynxChat</text>
+                </svg>
                 <p>Premium Private Connection</p>
             </div>
 
