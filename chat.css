@@ -311,13 +311,20 @@
         }
 
         .header {
-            background: var(--bg-primary);
-            border-bottom: 1px solid var(--border);
-            padding: calc(4px + env(safe-area-inset-top, 0px)) 10px 4px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            padding: calc(12px + env(safe-area-inset-top, 0px)) 10px 12px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        [data-theme="dark"] .header {
+            background: rgba(0, 0, 0, 0.3);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .header-left {
@@ -953,10 +960,18 @@
         }
 
         .input-area {
-            padding: 4px 10px;
-            padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));
-            background: var(--bg-primary);
-            border-top: 1px solid var(--border);
+            padding: 12px 10px;
+            padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        [data-theme="dark"] .input-area {
+            background: rgba(0, 0, 0, 0.3);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .input-container {
